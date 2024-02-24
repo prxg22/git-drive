@@ -1,4 +1,4 @@
-module github.com/prxg22/go-drive
+module github.com/prxg22/git-drive
 
 go 1.22
 

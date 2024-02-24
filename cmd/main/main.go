@@ -6,7 +6,7 @@ import (
 	"log"
 
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
-	"github.com/prxg22/go-drive/pkg/gitstorage"
+	"github.com/prxg22/git-drive/pkg/gitstorage"
 )
 
 func main() {
