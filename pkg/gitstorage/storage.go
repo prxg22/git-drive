@@ -3,7 +3,9 @@ package gitstorage
 import (
 	"fmt"
 	"log"
+	"os"
 
+	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
@@ -18,9 +20,10 @@ type GitStorage struct {
 }
 
 func NewGitStorage(owner string, repo string, keys *ssh.PublicKeys) (*GitStorage, error) {
-	url := fmt.Sprintf("git@github.com:%v/%v.git ", owner, repo)
-	log.Println(url)
-	st := &GitStorage{owner, repo, url, keys}
+
+	url := fmt.Sprintf("git@github.com:%v/%v.git", owner, repo)
+
+	st := &GitStorage{owner, repo, url, keys}	
 
 	if err := st.setup(); err != nil {
 		return nil, err
@@ -33,12 +36,15 @@ func (gs *GitStorage) setup() error {
 	options := git.CloneOptions{
 		URL:  gs.url,
 		Auth: gs.keys,
+		Progress: os.Stdout,
+		SingleBranch: true,
 	}
 
 	ms := memory.NewStorage()
+	fs := memfs.New()
 
 	log.Println("cloning repo...")
-	r, err := git.Clone(ms, nil, &options)
+	r, err := git.Clone(ms, fs, &options)
 
 	if err != nil {
 		return fmt.Errorf("failed cloning the repo: %w", err)
