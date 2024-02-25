@@ -12,30 +12,34 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
-type GitStorage struct {
-	url string
-	auth transport.AuthMethod 
-	fs billy.Filesystem
-	ms *memory.Storage
+type GithubStorage interface {
+	ReadDir(path string) ([]fs.FileInfo, error)
 }
 
-func NewGitStorage(owner, repo string, auth transport.AuthMethod) *GitStorage {
+type Storage struct {
+	url  string
+	auth transport.AuthMethod
+	fs   billy.Filesystem
+	ms   *memory.Storage
+}
+
+func NewGitStorage(owner, repo string, auth transport.AuthMethod) *Storage {
 	var url string
-	
+
 	switch auth.(type) {
-	case *ssh.PublicKeys :
-			url = fmt.Sprintf("git@github.com:%v/%v.git", owner, repo)
+	case *ssh.PublicKeys:
+		url = fmt.Sprintf("git@github.com:%v/%v.git", owner, repo)
 	default:
-			url = fmt.Sprintf("https://github.com/%v/%v", owner, repo)
+		url = fmt.Sprintf("https://github.com/%v/%v", owner, repo)
 	}
-	
-	gs:=  &GitStorage{url, auth, memfs.New(), memory.NewStorage()}	
+
+	gs := &Storage{url, auth, memfs.New(), memory.NewStorage()}
 
 	gs.clone()
 	return gs
 }
 
-func (gs *GitStorage) ReadDir(path string) ([]fs.FileInfo, error) {
+func (gs *Storage) ReadDir(path string) ([]fs.FileInfo, error) {
 	if _, err := gs.open(); err != nil {
 		return nil, err
 	}
@@ -47,18 +51,18 @@ func (gs *GitStorage) ReadDir(path string) ([]fs.FileInfo, error) {
 	}
 }
 
-func (gs *GitStorage) open() (*git.Repository, error) {
+func (gs *Storage) open() (*git.Repository, error) {
 	r, err := git.Open(gs.ms, gs.fs)
 
 	if err != nil {
 		return gs.clone()
-	} 
+	}
 	return r, nil
 }
 
-func (gs *GitStorage) clone() (*git.Repository, error) {
+func (gs *Storage) clone() (*git.Repository, error) {
 	r, err := git.Clone(gs.ms, gs.fs, &git.CloneOptions{
-		URL: gs.url,
+		URL:  gs.url,
 		Auth: gs.auth,
 	})
 
@@ -68,6 +72,3 @@ func (gs *GitStorage) clone() (*git.Repository, error) {
 
 	return r, nil
 }
-
-
-
