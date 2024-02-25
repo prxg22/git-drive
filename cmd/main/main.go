@@ -9,7 +9,7 @@ import (
 	"github.com/prxg22/git-drive/internal/handlers"
 	"github.com/prxg22/git-drive/internal/services"
 	"github.com/prxg22/git-drive/pkg/gitstorage"
-	"github.com/prxg22/git-drive/pkg/httpserver"
+	"github.com/prxg22/git-drive/pkg/spaserver"
 )
 
 func main() {
@@ -38,13 +38,13 @@ func main() {
 	gds := &services.Service{GithubStorage: gs}
 
 	// initiate routes and server
-	routes := make(httpserver.Routes)
+	routes := make(spaserver.Routes)
 
 	handler := handlers.DirHandler{S: gds}
 	routes["GET /dir/{dir...}"] = handler.ReadDir
 	routes["GET /dir"] = handler.ReadDir
 
-	s := httpserver.NewSPAServer(&routes, "/_api", _fileServerPath)
+	s := spaserver.NewSPAServer(&routes, "/_api", _fileServerPath)
 	log.Printf("listening on port %v\n", _port)
 	s.Listen(_port)
 }
