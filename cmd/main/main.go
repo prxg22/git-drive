@@ -19,7 +19,7 @@ func main() {
 	flag.StringVar(&_port, "p", ":8080", "server port to listen. default :8080")
 	flag.StringVar(&_privateKey, "pk", "", "ssh private key path")
 	flag.StringVar(&_pass, "ps", "", "ssh private key password. optional")
-	flag.StringVar(&_fileServerPath, "fp", "./public", "path where are the static files for the static file. default \"./public\"")
+	flag.StringVar(&_fileServerPath, "fp", "./app/build/client", "path where are the static files for the static file. default \"./public\"")
 	flag.StringVar(&_owner, "o", "", "repo's owner")
 	flag.StringVar(&_repo, "r", "", "repo's name")
 	flag.Parse()
@@ -44,7 +44,7 @@ func main() {
 	routes["GET /dir/{dir...}"] = handler.ReadDir
 	routes["GET /dir"] = handler.ReadDir
 
-	s := httpserver.NewServer(&routes, "/_api", _fileServerPath)
+	s := httpserver.NewSPAServer(&routes, "/_api", _fileServerPath)
 	log.Printf("listening on port %v\n", _port)
 	s.Listen(_port)
 }

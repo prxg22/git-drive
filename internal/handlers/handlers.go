@@ -16,6 +16,8 @@ func (dh *DirHandler) ReadDir(w http.ResponseWriter, r *http.Request) {
 
 	files, serviceErr := dh.S.ReadDir(dir)
 
+	w.Header().Add("Access-Control-Allow-Origin", "*")
+
 	if serviceErr != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(serviceErr.Error()))
