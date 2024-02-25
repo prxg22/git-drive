@@ -2,76 +2,72 @@ package gitstorage
 
 import (
 	"fmt"
-	"log"
-	"os"
+	"io/fs"
 
+	"github.com/go-git/go-billy/v5"
 	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
 type GitStorage struct {
-	owner string
-	repo  string
-	url   string
-	keys  *ssh.PublicKeys
+	url string
+	auth transport.AuthMethod 
+	fs billy.Filesystem
+	ms *memory.Storage
 }
 
-func NewGitStorage(owner string, repo string, keys *ssh.PublicKeys) (*GitStorage, error) {
+func NewGitStorage(owner, repo string, auth transport.AuthMethod) *GitStorage {
+	var url string
+	
+	switch auth.(type) {
+	case *ssh.PublicKeys :
+			url = fmt.Sprintf("git@github.com:%v/%v.git", owner, repo)
+	default:
+			url = fmt.Sprintf("https://github.com/%v/%v", owner, repo)
+	}
+	
+	gs:=  &GitStorage{url, auth, memfs.New(), memory.NewStorage()}	
 
-	url := fmt.Sprintf("git@github.com:%v/%v.git", owner, repo)
+	gs.clone()
+	return gs
+}
 
-	st := &GitStorage{owner, repo, url, keys}	
-
-	if err := st.setup(); err != nil {
+func (gs *GitStorage) ReadDir(path string) ([]fs.FileInfo, error) {
+	if _, err := gs.open(); err != nil {
 		return nil, err
 	}
 
-	return st, nil
+	if files, err := gs.fs.ReadDir(path); err == nil {
+		return files, nil
+	} else {
+		return nil, fmt.Errorf("failed to read directory \"%v\": %w", path, err)
+	}
 }
 
-func (gs *GitStorage) setup() error {
-	options := git.CloneOptions{
-		URL:  gs.url,
-		Auth: gs.keys,
-		Progress: os.Stdout,
-		SingleBranch: true,
-	}
-
-	ms := memory.NewStorage()
-	fs := memfs.New()
-
-	log.Println("cloning repo...")
-	r, err := git.Clone(ms, fs, &options)
+func (gs *GitStorage) open() (*git.Repository, error) {
+	r, err := git.Open(gs.ms, gs.fs)
 
 	if err != nil {
-		return fmt.Errorf("failed cloning the repo: %w", err)
-	}
-
-	log.Println("trying to get HEAD ref...")
-	ref, err := r.Head()
-	if err != nil {
-		return fmt.Errorf("failed to get HEAD: %w", err)
-	}
-
-	log.Println("logging commits...")
-	cIter, err := r.Log(&git.LogOptions{From: ref.Hash()})
-
-	if err != nil {
-		return fmt.Errorf("failed logging: %w", err)
-	}
-
-	log.Println("iterating over commits...")
-	// ... just iterates over the commits, printing it
-	if err = cIter.ForEach(func(c *object.Commit) error {
-		log.Println(c)
-		return nil
-	}); err != nil {
-		return fmt.Errorf("failed iterating over commits: %w", err)
-
-	}
-
-	return nil
+		return gs.clone()
+	} 
+	return r, nil
 }
+
+func (gs *GitStorage) clone() (*git.Repository, error) {
+	r, err := git.Clone(gs.ms, gs.fs, &git.CloneOptions{
+		URL: gs.url,
+		Auth: gs.auth,
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	return r, nil
+}
+
+
+
