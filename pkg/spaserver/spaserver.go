@@ -36,12 +36,12 @@ func route(mu *http.ServeMux, px string, p string, handler http.HandlerFunc) {
 	var method, path string
 	path = px + p
 	if mp := strings.Split(p, " "); len(mp) > 1 {
-		method = mp[0] + " "
+		method = mp[0]
 		path = px + mp[1]
 	}
 
-	log.Printf("routing path \"%v\"\n", method+path)
-	mu.Handle(method+path, handler)
+	log.Printf("routing [%v] %v\n", method, path)
+	mu.Handle(method+" "+path, handler)
 }
 
 func initiateSPAServer(mu *http.ServeMux, pp string) {
@@ -52,7 +52,6 @@ func initiateSPAServer(mu *http.ServeMux, pp string) {
 	mu.Handle("/", spah)
 	log.Printf("routing assets FileServer of path \"%v\" on /assets\n", ap)
 	log.Println("routing SPA handler on /")
-	log.Println(os.ReadDir(ap))
 }
 
 type spaHandler struct {

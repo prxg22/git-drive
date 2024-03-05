@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	var _port, _privateKey, _pass, _fileServerPath, _owner, _repo string
+	var _port, _privateKey, _pass, _fileServerPath, _owner, _repo, _remote string
 
 	// get config from flags
 	flag.StringVar(&_port, "p", ":8080", "server port to listen. default :8080")
@@ -22,6 +22,7 @@ func main() {
 	flag.StringVar(&_fileServerPath, "fp", "./app/build/client", "path where are the static files for the static file. default \"./public\"")
 	flag.StringVar(&_owner, "o", "", "repo's owner")
 	flag.StringVar(&_repo, "r", "", "repo's name")
+	flag.StringVar(&_remote, "rm", "origin", "repo's remote name")
 	flag.Parse()
 
 	if _privateKey == "" || _owner == "" || _repo == "" {
@@ -34,15 +35,17 @@ func main() {
 		log.Fatal(fmt.Errorf("failed getting keys on path \"%v\": \n%w", _privateKey, err))
 	}
 
-	gs := gitstorage.NewGitStorage(_owner, _repo, auth)
+	gs := gitstorage.NewGitStorage(_owner, _repo, _remote, auth)
 	gds := &services.Service{GithubStorage: gs}
 
 	// initiate routes and server
 	routes := make(spaserver.Routes)
 
 	handler := handlers.DirHandler{S: gds}
+	routes["OPTIONS /{dir...}"] = handlers.Options
 	routes["GET /dir/{dir...}"] = handler.ReadDir
 	routes["GET /dir"] = handler.ReadDir
+	routes["DELETE /{path...}"] = handler.Remove
 
 	s := spaserver.NewSPAServer(&routes, "/_api", _fileServerPath)
 	log.Printf("listening on port %v\n", _port)

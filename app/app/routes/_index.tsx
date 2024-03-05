@@ -3,9 +3,9 @@ import { useEffect } from 'react'
 
 export default function Index() {
   const navigate = useNavigate()
-  console.log('navigating to /d')
   useEffect(() => {
     navigate('/d')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   return null
 }
