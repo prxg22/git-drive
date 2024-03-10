@@ -10,7 +10,7 @@ import (
 )
 
 type DirHandler struct {
-	S services.GitDriveService
+	Service services.GitDriveService
 }
 
 func Options(w http.ResponseWriter, r *http.Request) {
@@ -23,7 +23,7 @@ func Options(w http.ResponseWriter, r *http.Request) {
 func (dh *DirHandler) ReadDir(w http.ResponseWriter, r *http.Request) {
 	dir := r.PathValue("dir")
 
-	files, err := dh.S.ReadDir(dir)
+	files, err := dh.Service.ReadDir(dir)
 
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 
@@ -51,7 +51,7 @@ func (dh *DirHandler) Remove(w http.ResponseWriter, r *http.Request) {
 	path := path.Clean(r.PathValue("path"))
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 
-	err := dh.S.Remove(path)
+	err := dh.Service.Remove(path)
 
 	if err != nil {
 		log.Println(err)

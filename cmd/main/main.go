@@ -8,7 +8,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/prxg22/git-drive/internal/handlers"
 	"github.com/prxg22/git-drive/internal/services"
-	"github.com/prxg22/git-drive/pkg/gitstorage"
+	"github.com/prxg22/git-drive/pkg/git"
 	"github.com/prxg22/git-drive/pkg/spaserver"
 )
 
@@ -35,13 +35,14 @@ func main() {
 		log.Fatal(fmt.Errorf("failed getting keys on path \"%v\": \n%w", _privateKey, err))
 	}
 
-	gs := gitstorage.NewGitStorage(_owner, _repo, _remote, auth)
-	gds := &services.Service{GithubStorage: gs}
+	gp := git.NewGitProcessor(_owner, _repo, _remote, auth)
+	gs := &git.GitStorage{Processor: gp}
+	gds := &services.Service{Storage: gs}
 
 	// initiate routes and server
 	routes := make(spaserver.Routes)
 
-	handler := handlers.DirHandler{S: gds}
+	handler := handlers.DirHandler{Service: gds}
 	routes["OPTIONS /{dir...}"] = handlers.Options
 	routes["GET /dir/{dir...}"] = handler.ReadDir
 	routes["GET /dir"] = handler.ReadDir

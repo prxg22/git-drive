@@ -1,6 +1,8 @@
 package services
 
-import "github.com/prxg22/git-drive/pkg/gitstorage"
+import (
+	"github.com/prxg22/git-drive/pkg/git"
+)
 
 type GitDriveService interface {
 	ReadDir(path string) ([]FileInfo, error)
@@ -8,7 +10,7 @@ type GitDriveService interface {
 }
 
 type Service struct {
-	gitstorage.GithubStorage
+	Storage *git.GitStorage
 }
 
 type FileInfo struct {
@@ -19,7 +21,7 @@ type FileInfo struct {
 }
 
 func (gds *Service) ReadDir(path string) ([]FileInfo, error) {
-	if f, err := gds.GithubStorage.ReadDir(path); err == nil {
+	if f, err := gds.Storage.ReadDir(path); err == nil {
 		files := make([]FileInfo, len(f))
 
 		for i, file := range f {
@@ -33,5 +35,5 @@ func (gds *Service) ReadDir(path string) ([]FileInfo, error) {
 }
 
 func (gds *Service) Remove(path string) error {
-	return gds.GithubStorage.Remove(path)
+	return gds.Storage.Remove(path)
 }
