@@ -36,9 +36,9 @@ func main() {
 		log.Fatal(fmt.Errorf("failed getting keys on path \"%v\": \n%w", _privateKey, err))
 	}
 
-	gp := git.NewGitProcessor(_owner, _repo, _remote, _path, auth)
-	gs := git.NewGitStorage(gp)
-	gds := &services.Service{Storage: gs}
+	gc := git.NewGitClient(_owner, _repo, _remote, _path, auth)
+	gfs := git.NewGitFileSystem(gc)
+	gds := &services.Service{GFS: gfs}
 
 	// initiate routes and server
 	routes := make(spaserver.Routes)

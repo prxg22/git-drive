@@ -20,8 +20,8 @@ const PUSH_TIMEOUT = 5
 
 var PULL_ACCEPTED_ERRORS = map[string]accepted_errors_set{"already up-to-date": nil}
 
-// GitProcessor represents a processor for Git operations.
-type GitProcessor struct {
+// GitClient represents a processor for Git operations.
+type GitClient struct {
 	Path   string                   // Path to the Git repository.
 	Out    chan []int64             // Channel to send output data.
 	url    string                   // URL of the remote repository.
@@ -38,14 +38,14 @@ type commitCmd struct {
 	paths   []string
 }
 
-// NewGitProcessor creates a new instance of GitProcessor with the specified parameters.
+// NewGitClient creates a new instance of GitProcessor with the specified parameters.
 // It initializes the GitProcessor struct and starts a goroutine to process the commands.
 // The owner and repo parameters specify the GitHub repository to work with.
 // The remote parameter specifies the remote name of the repository.
 // The basePath parameter specifies the base path of the local repository.
 // The auth parameter specifies the authentication method to use when interacting with the repository.
 // It returns a pointer to the created GitProcessor instance.
-func NewGitProcessor(owner, repo, remote, basePath string, auth transport.AuthMethod) *GitProcessor {
+func NewGitClient(owner, repo, remote, basePath string, auth transport.AuthMethod) *GitClient {
 	var url string
 
 	switch auth.(type) {
@@ -65,7 +65,7 @@ func NewGitProcessor(owner, repo, remote, basePath string, auth transport.AuthMe
 	cmds := make(chan *commitCmd, QUEUE_MAX_SIZE)
 	out := make(chan []int64, QUEUE_MAX_SIZE)
 
-	gp := &GitProcessor{
+	gc := &GitClient{
 		Out:    out,
 		Path:   path.Clean(basePath),
 		auth:   auth,
@@ -76,15 +76,15 @@ func NewGitProcessor(owner, repo, remote, basePath string, auth transport.AuthMe
 		cmds:   cmds,
 	}
 
-	go gp.process()
+	go gc.process()
 
-	return gp
+	return gc
 }
 
 // Commit adds and commits changes asynchronously. It takes a commit message and a list of paths to files that have been changed.
 // The function creates a commit command and sends it to the command channel for processing.
 // It returns the ID of the commit operation for tracking purposes.
-func (gp *GitProcessor) Commit(message string, paths []string) int64 {
+func (gc *GitClient) Commit(message string, paths []string) int64 {
 	cmd := &commitCmd{
 		time.Now().UnixMilli(),
 		message,
@@ -92,7 +92,7 @@ func (gp *GitProcessor) Commit(message string, paths []string) int64 {
 	}
 
 	go func() {
-		gp.cmds <- cmd
+		gc.cmds <- cmd
 	}()
 
 	return cmd.id
@@ -124,15 +124,15 @@ func clone(p, u, r string, a transport.AuthMethod) (*git.Repository, error) {
 	return repo, nil
 }
 
-func (gp *GitProcessor) pull() error {
-	w, err := gp.repo.Worktree()
+func (gc *GitClient) pull() error {
+	w, err := gc.repo.Worktree()
 	if err != nil {
 		return err
 	}
 
 	opts := &git.PullOptions{
-		RemoteName: gp.remote,
-		Auth:       gp.auth,
+		RemoteName: gc.remote,
+		Auth:       gc.auth,
 	}
 
 	dff := w.Pull(opts)
@@ -145,24 +145,31 @@ func (gp *GitProcessor) pull() error {
 	return nil
 }
 
-func (gp *GitProcessor) add(paths []string) error {
-	w, err := gp.repo.Worktree()
+func (gc *GitClient) add(paths []string) error {
+	w, err := gc.repo.Worktree()
 
 	if err != nil {
 		return err
 	}
 
 	for _, p := range paths {
-		if _, err = w.Add(p); err != nil {
-			return fmt.Errorf("error adding path %s: %w", path.Join("./", gp.Path, p), err)
+		if err != nil {
+			return fmt.Errorf("error getting path %s stats: %w", p, err)
+		}
+
+		_, err = w.Add(p)
+		log.Printf("added path \"%s\"", p)
+
+		if err != nil {
+			return fmt.Errorf("error adding path %s: %w", p, err)
 		}
 	}
 
 	return nil
 }
 
-func (gp *GitProcessor) commit(message string) error {
-	w, err := gp.repo.Worktree()
+func (gc *GitClient) commit(message string) error {
+	w, err := gc.repo.Worktree()
 
 	if err != nil {
 		return err
@@ -175,24 +182,24 @@ func (gp *GitProcessor) commit(message string) error {
 	return nil
 }
 
-func (gp *GitProcessor) push() error {
-	return gp.repo.Push(&git.PushOptions{
-		RemoteName: gp.remote,
-		Auth:       gp.auth,
+func (gc *GitClient) push() error {
+	return gc.repo.Push(&git.PushOptions{
+		RemoteName: gc.remote,
+		Auth:       gc.auth,
 	})
 }
 
 // processCmd processes the commit command.
 // It adds the specified paths to the Git repository and commits the changes with the given message.
 // Returns an error if any operation fails.
-func (gp *GitProcessor) processCmd(cmd *commitCmd) error {
+func (gc *GitClient) processCmd(cmd *commitCmd) error {
 	paths := cmd.paths
 
-	if err := gp.add(paths); err != nil {
+	if err := gc.add(paths); err != nil {
 		return err
 	}
 
-	if err := gp.commit(cmd.message); err != nil {
+	if err := gc.commit(cmd.message); err != nil {
 		return err
 	}
 
@@ -202,35 +209,34 @@ func (gp *GitProcessor) processCmd(cmd *commitCmd) error {
 // process is a method of the GitProcessor struct that continuously processes commands from the cmds channel.
 // It also handles pushing and pulling changes to and from the remote repository.
 // This method runs in an infinite loop until the program is terminated.
-func (gp *GitProcessor) process() {
+func (gc *GitClient) process() {
 	pushTimer := time.NewTimer(PUSH_TIMEOUT * time.Second)
 	for {
 		select {
-		case cmd := <-gp.cmds:
-			if err := gp.processCmd(cmd); err == nil {
-				gp.queue.Enqueue(cmd)
+		case cmd := <-gc.cmds:
+			if err := gc.processCmd(cmd); err == nil {
+				gc.queue.Enqueue(cmd)
 			} else {
 				log.Println(fmt.Errorf("error while processor try to process command: %w", err))
 			}
 
 		case <-pushTimer.C:
 			pushTimer.Reset(PUSH_TIMEOUT * time.Second)
-			if err := gp.push(); err == nil {
-				ids := make([]int64, gp.queue.Length())
+			if err := gc.push(); err == nil {
+				ids := make([]int64, gc.queue.Length())
 				i := 0
-				for cmd := range gp.queue.Iterate() {
+				for cmd := range gc.queue.Iterate() {
 					ids[i] = cmd.id
 					i++
 				}
 
-				gp.Out <- ids
+				gc.Out <- ids
 			} else if err.Error() != "already up-to-date" {
 				log.Println(fmt.Errorf("error while processor try to push: %w", err))
 			}
 		default:
-			if err := gp.pull(); err != nil && err.Error() != "already up-to-date" {
+			if err := gc.pull(); err != nil && err.Error() != "already up-to-date" {
 				log.Println(fmt.Errorf("error while processor try to pull: %w", err))
-
 			}
 		}
 	}

@@ -12,7 +12,7 @@ type GitDriveService interface {
 }
 
 type Service struct {
-	Storage *git.GitStorage
+	GFS *git.GitFileSystem
 }
 
 type FileInfo struct {
@@ -28,7 +28,7 @@ type Operation struct {
 }
 
 func (gds *Service) ReadDir(path string) ([]FileInfo, error) {
-	if f, err := gds.Storage.ReadDir(strings.TrimSpace(path)); err == nil {
+	if f, err := gds.GFS.ReadDir(strings.TrimSpace(path)); err == nil {
 		files := make([]FileInfo, len(f))
 
 		for i, file := range f {
@@ -42,7 +42,7 @@ func (gds *Service) ReadDir(path string) ([]FileInfo, error) {
 }
 
 func (gds *Service) Remove(path string) (*Operation, error) {
-	if id, err := gds.Storage.Remove(path); err == nil {
+	if id, err := gds.GFS.Remove(path); err == nil {
 		op := &Operation{
 			id,
 			'r',
