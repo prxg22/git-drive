@@ -4,12 +4,13 @@ import (
 	"fmt"
 )
 
+// Queue represents a generic queue data structure.
 type Queue[T any] struct {
 	capacity int
 	queue    []T
 	head     int
 	tail     int
-	count    int // Added to keep track of the number of elements in the queue
+	count    int
 }
 
 // NewQueue creates a new queue with the specified capacity.
