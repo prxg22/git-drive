@@ -3,40 +3,41 @@ package git
 import (
 	"fmt"
 	"log"
+	"path"
 	"time"
 
-	"github.com/go-git/go-billy/v5"
-	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
-	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/prxg22/git-drive/pkg/queue"
 )
 
 type accepted_errors_set = *struct{}
 
-const QUEUE_MAX_SIZE = 10
+const QUEUE_MAX_SIZE = 20
 const FLUSH_TIMEOUT = 1
 const PUSH_TIMEOUT = 5
 
 var PULL_ACCEPTED_ERRORS = map[string]accepted_errors_set{"already up-to-date": nil}
 
 type GitProcessor struct {
-	FileSystem billy.Filesystem
-	url        string
-	remote     string
-	auth       transport.AuthMethod
-	ms         *memory.Storage
-	queue      *queue.Queue[CommitCmd]
+	Path   string
+	Out    chan []int64
+	url    string
+	remote string
+	auth   transport.AuthMethod
+	repo   *git.Repository
+	queue  *queue.Queue[*commitCmd]
+	cmds   chan *commitCmd
 }
 
-type CommitCmd struct {
+type commitCmd struct {
+	id      int64
 	message string
 	paths   []string
 }
 
-func NewGitProcessor(owner, repo, remote string, auth transport.AuthMethod) *GitProcessor {
+func NewGitProcessor(owner, repo, remote, basePath string, auth transport.AuthMethod) *GitProcessor {
 	var url string
 
 	switch auth.(type) {
@@ -46,57 +47,76 @@ func NewGitProcessor(owner, repo, remote string, auth transport.AuthMethod) *Git
 		url = fmt.Sprintf("https://github.com/%v/%v", owner, repo)
 	}
 
-	q := queue.NewQueue[CommitCmd](QUEUE_MAX_SIZE)
-	gp := &GitProcessor{
-		FileSystem: memfs.New(),
-		url:        url,
-		remote:     remote,
-		auth:       auth,
-		ms:         memory.NewStorage(),
-		queue:      q,
+	q := queue.NewQueue[*commitCmd](QUEUE_MAX_SIZE)
+	r, err := open(basePath, url, remote, auth)
+
+	if err != nil {
+		log.Panic(err.Error())
 	}
 
-	gp.clone()
+	cmds := make(chan *commitCmd, QUEUE_MAX_SIZE)
+	out := make(chan []int64, QUEUE_MAX_SIZE)
+
+	gp := &GitProcessor{
+		Out:    out,
+		Path:   path.Clean(basePath),
+		auth:   auth,
+		queue:  q,
+		repo:   r,
+		remote: remote,
+		url:    url,
+		cmds:   cmds,
+	}
+
 	go gp.process()
 
 	return gp
 }
 
-func (gp *GitProcessor) Commit(cmd CommitCmd) error {
-	if gp.queue.IsFull() {
-		cmd, err := gp.queue.Dequeue()
-		if err != nil {
-			return err
-		}
-
-		gp.processCmd(cmd)
+func (gp *GitProcessor) Commit(message string, paths []string) int64 {
+	cmd := &commitCmd{
+		time.Now().UnixMilli(),
+		message,
+		paths,
 	}
 
-	log.Printf("enqueing cmd %v", cmd)
-	gp.queue.Enqueue(cmd)
-	return nil
+	go func() {
+		gp.cmds <- cmd
+	}()
+
+	return cmd.id
 }
 
-func (gp *GitProcessor) open() (*git.Repository, error) {
-	r, err := git.Open(gp.ms, gp.FileSystem)
+func open(p, u, r string, a transport.AuthMethod) (*git.Repository, error) {
+	repo, err := git.PlainOpen(p)
 
-	if err != nil {
-		return gp.clone()
+	if err == git.ErrRepositoryNotExists {
+		return clone(p, u, r, a)
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to open repository: %w", err)
 	}
 
-	return r, nil
+	return repo, nil
 }
 
-func (gp *GitProcessor) pull() (*git.Repository, error) {
-	r, err := gp.open()
+func clone(p, u, r string, a transport.AuthMethod) (*git.Repository, error) {
+	repo, err := git.PlainClone(p, false, &git.CloneOptions{
+		URL:        u,
+		Auth:       a,
+		RemoteName: r,
+	})
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open repository: %w", err)
 	}
 
-	w, err := r.Worktree()
+	return repo, nil
+}
+
+func (gp *GitProcessor) pull() error {
+	w, err := gp.repo.Worktree()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	opts := &git.PullOptions{
@@ -104,46 +124,26 @@ func (gp *GitProcessor) pull() (*git.Repository, error) {
 		Auth:       gp.auth,
 	}
 
-	pullErr := w.Pull(opts)
-	if pullErr != nil {
-		if _, acceptable := PULL_ACCEPTED_ERRORS[pullErr.Error()]; !acceptable {
-			return nil, fmt.Errorf("failed to pull working tree: %w", err)
+	dff := w.Pull(opts)
+	if dff != nil {
+		if _, acceptable := PULL_ACCEPTED_ERRORS[dff.Error()]; !acceptable {
+			return fmt.Errorf("failed to pull working tree: %w", err)
 		}
 	}
 
-	return r, nil
-}
-
-func (gp *GitProcessor) clone() (*git.Repository, error) {
-	r, err := git.Clone(gp.ms, gp.FileSystem, &git.CloneOptions{
-		URL:        gp.url,
-		Auth:       gp.auth,
-		RemoteName: gp.remote,
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to open repository: %w", err)
-	}
-
-	return r, nil
+	return nil
 }
 
 func (gp *GitProcessor) add(paths []string) error {
-	r, err := gp.open()
+	w, err := gp.repo.Worktree()
 
 	if err != nil {
 		return err
 	}
 
-	w, err := r.Worktree()
-
-	if err != nil {
-		return err
-	}
-
-	for _, path := range paths {
-		if _, err = w.Add(path); err != nil {
-			return err
+	for _, p := range paths {
+		if _, err = w.Add(p); err != nil {
+			return fmt.Errorf("error adding path %s: %w", path.Join("./", gp.Path, p), err)
 		}
 	}
 
@@ -151,13 +151,7 @@ func (gp *GitProcessor) add(paths []string) error {
 }
 
 func (gp *GitProcessor) commit(message string) error {
-	r, err := gp.open()
-
-	if err != nil {
-		return err
-	}
-
-	w, err := r.Worktree()
+	w, err := gp.repo.Worktree()
 
 	if err != nil {
 		return err
@@ -171,20 +165,16 @@ func (gp *GitProcessor) commit(message string) error {
 }
 
 func (gp *GitProcessor) push() error {
-	log.Printf("Pushing... | len: %d", gp.queue.Length())
-	if r, err := gp.open(); err == nil {
-		return r.Push(&git.PushOptions{
-			RemoteName: gp.remote,
-			Auth:       gp.auth,
-		})
-	} else {
-		return err
-	}
+	return gp.repo.Push(&git.PushOptions{
+		RemoteName: gp.remote,
+		Auth:       gp.auth,
+	})
 }
 
-func (gp *GitProcessor) processCmd(cmd CommitCmd) error {
-	log.Printf("Processing cmd %v | len: %d", cmd, gp.queue.Length())
-	if err := gp.add(cmd.paths); err != nil {
+func (gp *GitProcessor) processCmd(cmd *commitCmd) error {
+	paths := cmd.paths
+
+	if err := gp.add(paths); err != nil {
 		return err
 	}
 
@@ -195,44 +185,36 @@ func (gp *GitProcessor) processCmd(cmd CommitCmd) error {
 	return nil
 }
 
-func (gp *GitProcessor) flush() error {
-	if gp.queue.Length() == 0 {
-		return fmt.Errorf("empty queue")
-	}
-
-	log.Printf("flushing | q.length: %d", gp.queue.Length())
-
-	return gp.queue.Flush(func(cmd CommitCmd, _ int) error {
-		return gp.processCmd(cmd)
-	})
-}
-
 func (gp *GitProcessor) process() {
-	flushDuration := FLUSH_TIMEOUT * time.Second
-	pushDuration := PUSH_TIMEOUT * time.Second
-	flushTimer := time.NewTimer(flushDuration)
-	pushTimer := time.NewTimer(pushDuration)
-
+	pushTimer := time.NewTimer(PUSH_TIMEOUT * time.Second)
 	for {
 		select {
-		case <-pushTimer.C:
-			pushTimer.Reset(pushDuration)
-			log.Println("processor pushing...")
-
-			if err := gp.push(); err != nil {
-				log.Println(err)
+		case cmd := <-gp.cmds:
+			if err := gp.processCmd(cmd); err == nil {
+				gp.queue.Enqueue(cmd)
+			} else {
+				log.Println(fmt.Errorf("error while processor try to process command: %w", err))
 			}
-		case <-flushTimer.C:
-			flushTimer.Reset(flushDuration)
-			log.Println("processor flushing...")
 
-			if err := gp.flush(); err != nil {
-				log.Println(err)
-				continue
+		case <-pushTimer.C:
+			pushTimer.Reset(PUSH_TIMEOUT * time.Second)
+			if err := gp.push(); err == nil {
+				ids := make([]int64, gp.queue.Length())
+				i := 0
+				for cmd := range gp.queue.Iterate() {
+					ids[i] = cmd.id
+					i++
+				}
+
+				gp.Out <- ids
+			} else if err.Error() != "already up-to-date" {
+				log.Println(fmt.Errorf("error while processor try to push: %w", err))
 			}
 		default:
-			log.Println("processor pulling...")
-			gp.pull()
+			if err := gp.pull(); err != nil && err.Error() != "already up-to-date" {
+				log.Println(fmt.Errorf("error while processor try to pull: %w", err))
+
+			}
 		}
 	}
 }

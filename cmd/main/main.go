@@ -13,16 +13,17 @@ import (
 )
 
 func main() {
-	var _port, _privateKey, _pass, _fileServerPath, _owner, _repo, _remote string
+	var _port, _privateKey, _pass, _fileServerPath, _owner, _repo, _remote, _path string
 
 	// get config from flags
-	flag.StringVar(&_port, "p", ":8080", "server port to listen. default :8080")
-	flag.StringVar(&_privateKey, "pk", "", "ssh private key path")
-	flag.StringVar(&_pass, "ps", "", "ssh private key password. optional")
-	flag.StringVar(&_fileServerPath, "fp", "./app/build/client", "path where are the static files for the static file. default \"./public\"")
-	flag.StringVar(&_owner, "o", "", "repo's owner")
-	flag.StringVar(&_repo, "r", "", "repo's name")
-	flag.StringVar(&_remote, "rm", "origin", "repo's remote name")
+	flag.StringVar(&_port, "port", ":8080", "server port to listen. default :8080")
+	flag.StringVar(&_privateKey, "key", "", "ssh private key path")
+	flag.StringVar(&_pass, "pwd", "", "ssh private key password. optional")
+	flag.StringVar(&_fileServerPath, "static", "./app/build/client", "path in whichthe static files are located. default \"./public\"")
+	flag.StringVar(&_owner, "owner", "", "repo's owner")
+	flag.StringVar(&_repo, "repo", "", "repo's name")
+	flag.StringVar(&_remote, "remote", "origin", "repo's remote name")
+	flag.StringVar(&_path, "path", "/"+_repo, "local path in which repo will be cloned")
 	flag.Parse()
 
 	if _privateKey == "" || _owner == "" || _repo == "" {
@@ -35,8 +36,8 @@ func main() {
 		log.Fatal(fmt.Errorf("failed getting keys on path \"%v\": \n%w", _privateKey, err))
 	}
 
-	gp := git.NewGitProcessor(_owner, _repo, _remote, auth)
-	gs := &git.GitStorage{Processor: gp}
+	gp := git.NewGitProcessor(_owner, _repo, _remote, _path, auth)
+	gs := git.NewGitStorage(gp)
 	gds := &services.Service{Storage: gs}
 
 	// initiate routes and server

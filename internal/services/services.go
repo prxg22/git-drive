@@ -1,12 +1,14 @@
 package services
 
 import (
+	"strings"
+
 	"github.com/prxg22/git-drive/pkg/git"
 )
 
 type GitDriveService interface {
 	ReadDir(path string) ([]FileInfo, error)
-	Remove(path string) error
+	Remove(path string) (*Operation, error)
 }
 
 type Service struct {
@@ -20,8 +22,13 @@ type FileInfo struct {
 	IsDir bool    `json:"isDir"`
 }
 
+type Operation struct {
+	Id int64 `json:"id"`
+	Op byte  `json:"op"`
+}
+
 func (gds *Service) ReadDir(path string) ([]FileInfo, error) {
-	if f, err := gds.Storage.ReadDir(path); err == nil {
+	if f, err := gds.Storage.ReadDir(strings.TrimSpace(path)); err == nil {
 		files := make([]FileInfo, len(f))
 
 		for i, file := range f {
@@ -34,6 +41,16 @@ func (gds *Service) ReadDir(path string) ([]FileInfo, error) {
 	}
 }
 
-func (gds *Service) Remove(path string) error {
-	return gds.Storage.Remove(path)
+func (gds *Service) Remove(path string) (*Operation, error) {
+	if id, err := gds.Storage.Remove(path); err == nil {
+		op := &Operation{
+			id,
+			'r',
+		}
+
+		return op, nil
+	} else {
+		return nil, err
+	}
+
 }

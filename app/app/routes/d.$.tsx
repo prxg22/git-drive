@@ -3,7 +3,7 @@ import type {
   ClientActionFunctionArgs,
   ClientLoaderFunctionArgs,
 } from '@remix-run/react'
-import { Form, Link, useLoaderData } from '@remix-run/react'
+import { Form, Link, useActionData, useLoaderData } from '@remix-run/react'
 
 import { getDir, remove } from '../api'
 
@@ -32,12 +32,9 @@ export const clientAction = async ({ request }: ClientActionFunctionArgs) => {
   if (!path) return { error: 'No path provided' }
 
   try {
-    const ok = remove(path)
-    if (!ok) {
-      return { error: 'Failed to remove file' }
-    }
+    const operation = await remove(path)
 
-    return { deleted: { path } }
+    return { operation }
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Unknown error' }
   }
@@ -45,21 +42,28 @@ export const clientAction = async ({ request }: ClientActionFunctionArgs) => {
 
 export default function Dir() {
   const { filesInfos, error, path } = useLoaderData<typeof clientLoader>()
-  if (error) {
-    return <div>{error}</div>
+  const actionData = useActionData<typeof clientAction>()
+  const { operation, error: actionError } = actionData || {}
+
+  if (error || actionError) {
+    return <div>{error || actionError}</div>
   }
   const pwd = `/d${path}`
   const breadcrumbs = path?.split('/').slice(0, -1)
-  console.log({ path, pwd, breadcrumbs, filesInfos })
   return (
     <div style={{ fontFamily: 'system-ui, sans-serif', lineHeight: '1.8' }}>
       <h1>git-drive</h1>
       <div>
         {breadcrumbs?.map((dir, i, arr) => {
+          const name = dir || 'Home'
+          const breadcrumbKey = `${name.replace(/\s/g, '_')}_${i}`
           return (
             <>
-              <Link to={`/d${arr.slice(0, i + 1).join('/')}/`} key={dir}>
-                {dir || 'Home'}
+              <Link
+                to={`/d${arr.slice(0, i + 1).join('/')}/`}
+                key={breadcrumbKey}
+              >
+                {name}
               </Link>
               {' / '}
             </>
@@ -68,12 +72,14 @@ export default function Dir() {
       </div>
 
       {filesInfos?.map((info, i) => {
+        const fileKey = `${info.name.replace(/\s/g, '_')}_${i}`
+        const formKey = `${info.name.replace(/\s/g, '_')}-form`
         return (
           <>
-            <Form method="post" id={`form_${i}`} action={pwd}>
+            <Form method="post" id={`form_${i}`} action={pwd} key={formKey}>
               <input type="hidden" name="path" value={path + info.name} />
             </Form>
-            <div key={info.name}>
+            <div key={fileKey}>
               {info.isDir ? '📁' : '📄'}{' '}
               {info.isDir ? (
                 <Link to={`${pwd}${info.name}/`}>{info.name}</Link>
@@ -87,6 +93,12 @@ export default function Dir() {
           </>
         )
       })}
+
+      {operation && (
+        <div>
+          {operation.id} : {operation.op}
+        </div>
+      )}
     </div>
   )
 }

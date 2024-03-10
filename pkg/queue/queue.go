@@ -61,8 +61,26 @@ func (q *Queue[T]) Dequeue() (T, error) {
 	return el, nil
 }
 
-func (q *Queue[T]) Flush(fn func(el T, i int) error) error {
+func (q *Queue[T]) Iterate() chan T {
+	c := make(chan T, q.Length())
 
+	go func() {
+		defer close(c)
+
+		for q.count > 0 {
+			el, err := q.Dequeue()
+
+			if err != nil {
+				break
+			}
+			c <- el
+		}
+	}()
+
+	return c
+}
+
+func (q *Queue[T]) Flush(fn func(el T, i int) error) error {
 	i := 0
 
 	for q.count > 0 {

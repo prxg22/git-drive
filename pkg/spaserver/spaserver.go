@@ -68,7 +68,5 @@ func (spah spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(200)
-	// w.Header().Add("Content-Type", "text/html")
 	w.Write(index)
-
 }

@@ -16,5 +16,7 @@ export const remove = async (path: string) => {
     method: 'DELETE',
   })
 
-  return response.ok
+  const operation = (await response.json()) as { op: number; id: number }
+
+  return operation
 }

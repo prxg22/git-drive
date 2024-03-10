@@ -47,11 +47,10 @@ func (dh *DirHandler) ReadDir(w http.ResponseWriter, r *http.Request) {
 }
 
 func (dh *DirHandler) Remove(w http.ResponseWriter, r *http.Request) {
-	log.Println("receiving request")
 	path := path.Clean(r.PathValue("path"))
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 
-	err := dh.Service.Remove(path)
+	op, err := dh.Service.Remove(path)
 
 	if err != nil {
 		log.Println(err)
@@ -61,7 +60,15 @@ func (dh *DirHandler) Remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	w.Header().Add("Content-Type", "application/json")
-	w.Write([]byte("{ \"ok\": true }"))
+	if res, err := json.Marshal(op); err == nil {
+		w.WriteHeader(http.StatusOK)
+		w.Header().Add("Content-Type", "application/json")
+		w.Write(res)
+	} else {
+		log.Println(err)
+
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+		return
+	}
 }
