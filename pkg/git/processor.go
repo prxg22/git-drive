@@ -20,15 +20,16 @@ const PUSH_TIMEOUT = 5
 
 var PULL_ACCEPTED_ERRORS = map[string]accepted_errors_set{"already up-to-date": nil}
 
+// GitProcessor represents a processor for Git operations.
 type GitProcessor struct {
-	Path   string
-	Out    chan []int64
-	url    string
-	remote string
-	auth   transport.AuthMethod
-	repo   *git.Repository
-	queue  *queue.Queue[*commitCmd]
-	cmds   chan *commitCmd
+	Path   string                   // Path to the Git repository.
+	Out    chan []int64             // Channel to send output data.
+	url    string                   // URL of the remote repository.
+	remote string                   // Name of the remote repository.
+	auth   transport.AuthMethod     // Authentication method for accessing the remote repository.
+	repo   *git.Repository          // Git repository object.
+	queue  *queue.Queue[*commitCmd] // Queue of commit commands.
+	cmds   chan *commitCmd          // Channel to receive commit commands.
 }
 
 type commitCmd struct {
@@ -37,6 +38,13 @@ type commitCmd struct {
 	paths   []string
 }
 
+// NewGitProcessor creates a new instance of GitProcessor with the specified parameters.
+// It initializes the GitProcessor struct and starts a goroutine to process the commands.
+// The owner and repo parameters specify the GitHub repository to work with.
+// The remote parameter specifies the remote name of the repository.
+// The basePath parameter specifies the base path of the local repository.
+// The auth parameter specifies the authentication method to use when interacting with the repository.
+// It returns a pointer to the created GitProcessor instance.
 func NewGitProcessor(owner, repo, remote, basePath string, auth transport.AuthMethod) *GitProcessor {
 	var url string
 
@@ -73,6 +81,9 @@ func NewGitProcessor(owner, repo, remote, basePath string, auth transport.AuthMe
 	return gp
 }
 
+// Commit adds and commits changes asynchronously. It takes a commit message and a list of paths to files that have been changed.
+// The function creates a commit command and sends it to the command channel for processing.
+// It returns the ID of the commit operation for tracking purposes.
 func (gp *GitProcessor) Commit(message string, paths []string) int64 {
 	cmd := &commitCmd{
 		time.Now().UnixMilli(),
@@ -171,6 +182,9 @@ func (gp *GitProcessor) push() error {
 	})
 }
 
+// processCmd processes the commit command.
+// It adds the specified paths to the Git repository and commits the changes with the given message.
+// Returns an error if any operation fails.
 func (gp *GitProcessor) processCmd(cmd *commitCmd) error {
 	paths := cmd.paths
 
@@ -185,6 +199,9 @@ func (gp *GitProcessor) processCmd(cmd *commitCmd) error {
 	return nil
 }
 
+// process is a method of the GitProcessor struct that continuously processes commands from the cmds channel.
+// It also handles pushing and pulling changes to and from the remote repository.
+// This method runs in an infinite loop until the program is terminated.
 func (gp *GitProcessor) process() {
 	pushTimer := time.NewTimer(PUSH_TIMEOUT * time.Second)
 	for {
