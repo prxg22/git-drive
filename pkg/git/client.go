@@ -269,6 +269,7 @@ func (gc *GitClient) processCmd(cmd *command) error {
 	}
 	gc.updateOpStage(cmd.id, "commit", 66)
 
+	gc.queue.Enqueue(cmd)
 	return nil
 }
 
@@ -308,18 +309,10 @@ func (gc *GitClient) process() {
 	for {
 		select {
 		case cmd := <-gc.cmds:
-			if err := gc.processCmd(cmd); err == nil {
-				gc.queue.Enqueue(cmd)
-			} else {
-				log.Println(fmt.Errorf("error while processor try to process command: %w", err))
-			}
-
+			go gc.processCmd(cmd)
 		case <-pushTimer.C:
 			pushTimer.Reset(PUSH_TIMEOUT * time.Second)
-			if err := gc.pushCmds(); err != nil {
-				log.Println(fmt.Errorf("error while processor try to push commands: %w", err))
-			}
-
+			go gc.pushCmds()
 		default:
 			if err := gc.pull(); err != nil && err.Error() != "already up-to-date" {
 				log.Println(fmt.Errorf("error while processor try to pull: %w", err))

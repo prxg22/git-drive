@@ -29,23 +29,5 @@ export const connectOperationsEventSource = (id: number) => {
   url.pathname = `_api/operations/${id}`
   const es = new EventSource(url)
 
-  es.onmessage = (e) => {
-    console.log(e.data)
-    const msg = JSON.parse(e.data)
-
-    if ('ok' in msg) {
-      console.log('Done! ok:', msg.ok)
-      return
-    }
-
-    const op = msg as { progress: number }
-    console.log({ data: e.data, op })
-  }
-
-  es.onerror = (e) => {
-    console.error('Failed to connect to event source', e)
-    es.close()
-  }
-
   return es
 }

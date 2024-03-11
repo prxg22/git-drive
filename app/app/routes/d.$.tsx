@@ -4,7 +4,7 @@ import type {
   ClientLoaderFunctionArgs,
 } from '@remix-run/react'
 import { Form, Link, useActionData, useLoaderData } from '@remix-run/react'
-import { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 
 import { connectOperationsEventSource, getDir, remove } from '../api'
 
@@ -34,21 +34,33 @@ export const clientAction = async ({ request }: ClientActionFunctionArgs) => {
 
   try {
     const operation = await remove(path)
-
-    return { operation }
+    const parts = path.split('/')
+    return {
+      operation: {
+        ...operation,
+        path: parts[parts.length - 1],
+      },
+    }
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Unknown error' }
   }
 }
 
-const Progress = (props: { id: number }) => {
+const Progress = (props: { id: number; path: string; op: number }) => {
   const { id } = props
   const [progress, setProgress] = useState(0)
-  const es = useMemo(() => connectOperationsEventSource(id), [id])
 
   useEffect(() => {
+    const es = connectOperationsEventSource(id)
+    const close = () => {
+      console.log('Connection closed')
+      es.close()
+    }
     es.onmessage = (e) => {
-      console.log(e.data)
+      if (e.data === 'close') {
+        return close()
+      }
+
       const msg = JSON.parse(e.data)
 
       if ('ok' in msg) {
@@ -64,18 +76,12 @@ const Progress = (props: { id: number }) => {
     es.onopen = () => {
       console.log(`oppened connection with ${id}`)
     }
-
-    // return () => {
-    //   console.log(`closing connection with ${id}`)
-    //   onClose()
-    //   es.close()
-    // }
-  }, [es, id])
+  }, [id])
 
   return (
     <>
       <span>
-        [{props.id}]:
+        [{props.id} - {props.path} - {props.op}]:
         <progress value={progress} max="100" />
       </span>
     </>
@@ -83,6 +89,7 @@ const Progress = (props: { id: number }) => {
 }
 
 export default function Dir() {
+  const [ops, setOps] = useState<{ id: number; path: string; op: number }[]>([])
   const { filesInfos, error, path } = useLoaderData<typeof clientLoader>()
   const actionData = useActionData<typeof clientAction>()
   const { operation, error: actionError } = actionData || {}
@@ -91,6 +98,13 @@ export default function Dir() {
   }
   const pwd = `/d${path}`
   const breadcrumbs = path?.split('/').slice(0, -1)
+
+  if (operation && !ops.some((o) => o.id === operation.id)) {
+    setOps((old) => {
+      return [...old, operation]
+    })
+  }
+
   return (
     <div style={{ fontFamily: 'system-ui, sans-serif', lineHeight: '1.8' }}>
       <h1>git-drive</h1>
@@ -99,28 +113,21 @@ export default function Dir() {
           const name = dir || 'Home'
           const breadcrumbKey = `${name.replace(/\s/g, '_')}_${i}`
           return (
-            <>
-              <Link
-                to={`/d${arr.slice(0, i + 1).join('/')}/`}
-                key={breadcrumbKey}
-              >
-                {name}
-              </Link>
-              {' / '}
-            </>
+            <span key={breadcrumbKey}>
+              <Link to={`/d${arr.slice(0, i + 1).join('/')}/`}>{name}</Link>
+            </span>
           )
         })}
       </div>
 
       {filesInfos?.map((info, i) => {
-        const fileKey = `${info.name.replace(/\s/g, '_')}_${i}`
-        const formKey = `${info.name.replace(/\s/g, '_')}-form`
+        const key = `${info.name.replace(/\s/g, '_')}_${i}`
         return (
-          <>
-            <Form method="post" id={`form_${i}`} action={pwd} key={formKey}>
+          <React.Fragment key={key}>
+            <Form method="post" id={`form_${i}`} action={pwd}>
               <input type="hidden" name="path" value={path + info.name} />
             </Form>
-            <div key={fileKey}>
+            <div>
               {info.isDir ? '📁' : '📄'}{' '}
               {info.isDir ? (
                 <Link to={`${pwd}${info.name}/`}>{info.name}</Link>
@@ -131,11 +138,16 @@ export default function Dir() {
                 remove
               </button>
             </div>
-          </>
+          </React.Fragment>
         )
       })}
 
-      {operation && <Progress id={operation.id} key={operation.id} />}
+      {ops.length > 0 &&
+        ops.map((op) => (
+          <div key={op.id}>
+            <Progress {...op} />
+          </div>
+        ))}
     </div>
   )
 }

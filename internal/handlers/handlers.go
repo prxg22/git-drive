@@ -93,10 +93,35 @@ func (dh *DirHandler) GetOperations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set the headers related to event streaming.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// // Create a ticker that ticks every second.
+	// ticker := time.NewTicker(1 * time.Second)
+	// defer ticker.Stop()
+	// // Send events for a limited time (e.g., 10 seconds) for demonstration.
+	// endTime := time.Now().Add(10 * time.Second)
+	// for {
+	// 	select {
+	// 	case t := <-ticker.C:
+	// 		if time.Now().After(endTime) {
+	// 			fmt.Fprintln(w, "event: close\ndata: close")
+	// 			if f, ok := w.(http.Flusher); ok {
+	// 				f.Flush()
+	// 			}
+	// 			return // Stop the handler.
+	// 		}
+	// 		fmt.Fprintf(w, "data: The time is: %v\n\n", t)
+	// 		if f, ok := w.(http.Flusher); ok {
+	// 			f.Flush()
+	// 		}
+	// 	case <-r.Context().Done():
+	// 		return
+	// 	}
+	// }
 
 	checkProgress(w, r, c)
 }
@@ -107,11 +132,15 @@ func checkProgress(w http.ResponseWriter, r *http.Request, c chan *services.Oper
 		select {
 		case op := <-c:
 			if op == nil {
+				fmt.Fprintf(w, "event: close\n\n")
+				fmt.Fprintf(w, "data: close\n\n")
 				return
 			}
 			if res, err := json.Marshal(op); err == nil {
-				log.Printf("sending %s", res)
-				fmt.Fprintf(w, "%s\n", res)
+				if op.Status == "failed" {
+					fmt.Fprintf(w, "event: error\n\n")
+				}
+				fmt.Fprintf(w, "data: %s\n\n", res)
 				if f, ok := w.(http.Flusher); ok {
 					f.Flush()
 				}
