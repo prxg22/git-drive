@@ -15,27 +15,34 @@ import (
 type accepted_errors_set = *struct{}
 
 const QUEUE_MAX_SIZE = 20
-const FLUSH_TIMEOUT = 1
 const PUSH_TIMEOUT = 5
 
 var PULL_ACCEPTED_ERRORS = map[string]accepted_errors_set{"already up-to-date": nil}
 
 // GitClient represents a processor for Git operations.
 type GitClient struct {
-	Path   string                   // Path to the Git repository.
-	Out    chan []int64             // Channel to send output data.
-	url    string                   // URL of the remote repository.
-	remote string                   // Name of the remote repository.
-	auth   transport.AuthMethod     // Authentication method for accessing the remote repository.
-	repo   *git.Repository          // Git repository object.
-	queue  *queue.Queue[*commitCmd] // Queue of commit commands.
-	cmds   chan *commitCmd          // Channel to receive commit commands.
+	Path   string                 // Path to the Git repository.
+	url    string                 // URL of the remote repository.
+	remote string                 // Name of the remote repository.
+	auth   transport.AuthMethod   // Authentication method for accessing the remote repository.
+	repo   *git.Repository        // Git repository object.
+	queue  *queue.Queue[*command] // Queue of commit commands.
+	cmds   chan *command          // Channel to receive commit commands.
+	out    map[int64]chan *Operation
+	ops    map[int64]*Operation
 }
 
-type commitCmd struct {
+type command struct {
 	id      int64
 	message string
 	paths   []string
+}
+
+type Operation struct {
+	Stage    string
+	Status   string
+	Progress uint32
+	Data     string
 }
 
 // NewGitClient creates a new instance of GitProcessor with the specified parameters.
@@ -55,25 +62,27 @@ func NewGitClient(owner, repo, remote, basePath string, auth transport.AuthMetho
 		url = fmt.Sprintf("https://github.com/%v/%v", owner, repo)
 	}
 
-	q := queue.NewQueue[*commitCmd](QUEUE_MAX_SIZE)
+	q := queue.NewQueue[*command](QUEUE_MAX_SIZE)
 	r, err := open(basePath, url, remote, auth)
 
 	if err != nil {
 		log.Panic(err.Error())
 	}
 
-	cmds := make(chan *commitCmd, QUEUE_MAX_SIZE)
-	out := make(chan []int64, QUEUE_MAX_SIZE)
+	cmds := make(chan *command, QUEUE_MAX_SIZE)
+	out := make(map[int64]chan *Operation)
+	ops := make(map[int64]*Operation)
 
 	gc := &GitClient{
-		Out:    out,
 		Path:   path.Clean(basePath),
 		auth:   auth,
+		cmds:   cmds,
 		queue:  q,
 		repo:   r,
+		out:    out,
+		ops:    ops,
 		remote: remote,
 		url:    url,
-		cmds:   cmds,
 	}
 
 	go gc.process()
@@ -84,8 +93,8 @@ func NewGitClient(owner, repo, remote, basePath string, auth transport.AuthMetho
 // Commit adds and commits changes asynchronously. It takes a commit message and a list of paths to files that have been changed.
 // The function creates a commit command and sends it to the command channel for processing.
 // It returns the ID of the commit operation for tracking purposes.
-func (gc *GitClient) Commit(message string, paths []string) int64 {
-	cmd := &commitCmd{
+func (gc *GitClient) Commit(message string, paths []string) (int64, error) {
+	cmd := &command{
 		time.Now().UnixMilli(),
 		message,
 		paths,
@@ -95,7 +104,19 @@ func (gc *GitClient) Commit(message string, paths []string) int64 {
 		gc.cmds <- cmd
 	}()
 
-	return cmd.id
+	out := make(chan *Operation, QUEUE_MAX_SIZE)
+	gc.out[cmd.id] = out
+	gc.ops[cmd.id] = &Operation{
+		Stage: "pending",
+	}
+
+	err := gc.updateOpStage(cmd.id, "queue", 0)
+
+	return cmd.id, err
+}
+
+func (gc *GitClient) ListenOperation(id int64) chan *Operation {
+	return gc.out[id]
 }
 
 func open(p, u, r string, a transport.AuthMethod) (*git.Repository, error) {
@@ -158,7 +179,7 @@ func (gc *GitClient) add(paths []string) error {
 		}
 
 		_, err = w.Add(p)
-		log.Printf("added path \"%s\"", p)
+		// log.Printf("added path \"%s\"", p)
 
 		if err != nil {
 			return fmt.Errorf("error adding path %s: %w", p, err)
@@ -189,17 +210,90 @@ func (gc *GitClient) push() error {
 	})
 }
 
+func (gc *GitClient) updateOp(id int64, stage string, pgrss uint32, status string, data string) error {
+	p, exists := gc.ops[id]
+
+	if !exists {
+		return fmt.Errorf("progress %d doesn't exist in progress map", id)
+	}
+
+	out, exists := gc.out[id]
+
+	if !exists {
+		return fmt.Errorf("out channel %d doesn't exist in progress map", id)
+	}
+	p.Progress = pgrss
+	p.Stage = stage
+	p.Status = status
+	p.Data = data
+	out <- p
+	return nil
+}
+
+func (gc *GitClient) updateOpStatus(id int64, status string, p int32, data string) error {
+	if op, ok := gc.ops[id]; ok {
+		prgss := uint32(p)
+
+		if p < 0 {
+			prgss = op.Progress
+		}
+
+		return gc.updateOp(id, op.Stage, prgss, status, data)
+	} else {
+		return fmt.Errorf("op %d not found", id)
+	}
+}
+
+func (gc *GitClient) updateOpStage(id int64, stage string, p uint32) error {
+	if op, ok := gc.ops[id]; ok {
+		return gc.updateOp(id, stage, p, "pending", op.Data)
+	} else {
+		return fmt.Errorf("op %d not found", id)
+	}
+}
+
 // processCmd processes the commit command.
 // It adds the specified paths to the Git repository and commits the changes with the given message.
 // Returns an error if any operation fails.
-func (gc *GitClient) processCmd(cmd *commitCmd) error {
+func (gc *GitClient) processCmd(cmd *command) error {
 	paths := cmd.paths
-
 	if err := gc.add(paths); err != nil {
+		gc.updateOpStatus(cmd.id, "failed", -1, err.Error())
 		return err
 	}
+	gc.updateOpStage(cmd.id, "add", 33)
 
 	if err := gc.commit(cmd.message); err != nil {
+		gc.updateOpStatus(cmd.id, "failed", -1, err.Error())
+		return err
+	}
+	gc.updateOpStage(cmd.id, "commit", 66)
+
+	return nil
+}
+
+func (gc *GitClient) pushCmds() error {
+	for cmd := range gc.queue.Iterate() {
+		gc.updateOpStage(cmd.id, "push", 69)
+		gc.queue.Enqueue(cmd)
+	}
+
+	if err := gc.push(); err == nil {
+		for cmd := range gc.queue.Iterate() {
+			gc.updateOpStatus(cmd.id, "success", 100, "")
+
+			defer delete(gc.out, cmd.id)
+			defer delete(gc.ops, cmd.id)
+			defer close(gc.out[cmd.id])
+		}
+	} else if err.Error() != "already up-to-date" {
+		for cmd := range gc.queue.Iterate() {
+			gc.updateOpStatus(cmd.id, "falied", -1, err.Error())
+
+			defer delete(gc.out, cmd.id)
+			defer delete(gc.ops, cmd.id)
+			defer close(gc.out[cmd.id])
+		}
 		return err
 	}
 
@@ -222,18 +316,10 @@ func (gc *GitClient) process() {
 
 		case <-pushTimer.C:
 			pushTimer.Reset(PUSH_TIMEOUT * time.Second)
-			if err := gc.push(); err == nil {
-				ids := make([]int64, gc.queue.Length())
-				i := 0
-				for cmd := range gc.queue.Iterate() {
-					ids[i] = cmd.id
-					i++
-				}
-
-				gc.Out <- ids
-			} else if err.Error() != "already up-to-date" {
-				log.Println(fmt.Errorf("error while processor try to push: %w", err))
+			if err := gc.pushCmds(); err != nil {
+				log.Println(fmt.Errorf("error while processor try to push commands: %w", err))
 			}
+
 		default:
 			if err := gc.pull(); err != nil && err.Error() != "already up-to-date" {
 				log.Println(fmt.Errorf("error while processor try to pull: %w", err))

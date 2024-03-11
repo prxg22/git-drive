@@ -4,8 +4,9 @@ import type {
   ClientLoaderFunctionArgs,
 } from '@remix-run/react'
 import { Form, Link, useActionData, useLoaderData } from '@remix-run/react'
+import { useEffect, useMemo, useState } from 'react'
 
-import { getDir, remove } from '../api'
+import { connectOperationsEventSource, getDir, remove } from '../api'
 
 export const meta: MetaFunction = () => {
   return [
@@ -40,11 +41,51 @@ export const clientAction = async ({ request }: ClientActionFunctionArgs) => {
   }
 }
 
+const Progress = (props: { id: number }) => {
+  const { id } = props
+  const [progress, setProgress] = useState(0)
+  const es = useMemo(() => connectOperationsEventSource(id), [id])
+
+  useEffect(() => {
+    es.onmessage = (e) => {
+      console.log(e.data)
+      const msg = JSON.parse(e.data)
+
+      if ('ok' in msg) {
+        console.log('Done! ok:', msg.ok)
+        return
+      }
+
+      const op = msg as { progress: number }
+      setProgress(op.progress)
+      console.log({ data: e.data, op })
+    }
+
+    es.onopen = () => {
+      console.log(`oppened connection with ${id}`)
+    }
+
+    // return () => {
+    //   console.log(`closing connection with ${id}`)
+    //   onClose()
+    //   es.close()
+    // }
+  }, [es, id])
+
+  return (
+    <>
+      <span>
+        [{props.id}]:
+        <progress value={progress} max="100" />
+      </span>
+    </>
+  )
+}
+
 export default function Dir() {
   const { filesInfos, error, path } = useLoaderData<typeof clientLoader>()
   const actionData = useActionData<typeof clientAction>()
   const { operation, error: actionError } = actionData || {}
-
   if (error || actionError) {
     return <div>{error || actionError}</div>
   }
@@ -94,11 +135,7 @@ export default function Dir() {
         )
       })}
 
-      {operation && (
-        <div>
-          {operation.id} : {operation.op}
-        </div>
-      )}
+      {operation && <Progress id={operation.id} key={operation.id} />}
     </div>
   )
 }

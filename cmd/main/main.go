@@ -38,7 +38,7 @@ func main() {
 
 	gc := git.NewGitClient(_owner, _repo, _remote, _path, auth)
 	gfs := git.NewGitFileSystem(gc)
-	gds := &services.Service{GFS: gfs}
+	gds := services.NewGitDriveService(gfs)
 
 	// initiate routes and server
 	routes := make(spaserver.Routes)
@@ -48,6 +48,7 @@ func main() {
 	routes["GET /dir/{dir...}"] = handler.ReadDir
 	routes["GET /dir"] = handler.ReadDir
 	routes["DELETE /{path...}"] = handler.Remove
+	routes["GET /operations/{id}"] = handler.GetOperations
 
 	s := spaserver.NewSPAServer(&routes, "/_api", _fileServerPath)
 	log.Printf("listening on port %v\n", _port)

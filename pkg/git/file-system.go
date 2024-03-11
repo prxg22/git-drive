@@ -3,7 +3,6 @@ package git
 import (
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path"
 	"strings"
@@ -70,7 +69,6 @@ func (gfs *GitFileSystem) ReadDir(p string) ([]fs.FileInfo, error) {
 }
 
 func (gfs *GitFileSystem) removeRecursively(p string) ([]string, error) {
-	log.Printf("trying to remove path \"%s\"", p)
 	info, err := os.Stat(path.Join(gfs.Path, p))
 
 	if err != nil {
@@ -101,8 +99,6 @@ func (gfs *GitFileSystem) removeRecursively(p string) ([]string, error) {
 		return nil, err
 	}
 
-	log.Printf("removed path \"%s\" | paths: %v", p, paths)
-
 	return paths, nil
 }
 
@@ -117,10 +113,14 @@ func (gfs *GitFileSystem) Remove(p string) (int64, error) {
 		return -1, err
 	}
 
-	id := gp.Commit(
+	id, err := gp.Commit(
 		"rm: "+strings.Join(paths, " | "),
 		paths,
 	)
+
+	if err != nil {
+		return -1, err
+	}
 
 	return id, nil
 }

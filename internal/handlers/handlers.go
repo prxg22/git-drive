@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"path"
+	"strconv"
 
 	"github.com/prxg22/git-drive/internal/services"
 )
@@ -66,9 +68,58 @@ func (dh *DirHandler) Remove(w http.ResponseWriter, r *http.Request) {
 		w.Write(res)
 	} else {
 		log.Println(err)
-
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 		return
+	}
+}
+
+func (dh *DirHandler) GetOperations(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	c, err := dh.Service.ListeOperation(id)
+
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	checkProgress(w, r, c)
+}
+
+func checkProgress(w http.ResponseWriter, r *http.Request, c chan *services.Operation) {
+	ok := true
+	for ok {
+		select {
+		case op := <-c:
+			if op == nil {
+				return
+			}
+			if res, err := json.Marshal(op); err == nil {
+				log.Printf("sending %s", res)
+				fmt.Fprintf(w, "%s\n", res)
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+			} else {
+				return
+			}
+		case <-r.Context().Done():
+			return
+		}
 	}
 }
